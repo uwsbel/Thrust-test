@@ -14,25 +14,34 @@
 #include <thrust/execution_policy.h>
 #include <thrust/system/cuda/execution_policy.h>
 
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::flush;
+const int    ARRAY_SIZE = 10;
+const double PRESET_VALUE = 10000.0;
 
-void scatter_test() {
-	cout << "Scatter test ... " << flush;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
+bool check_scatter(const double *h_output, const double *h_input, const int *h_map)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		if (h_output[h_map[i]] != h_input[i])
+			return false;
+
+	return true;
+}
+
+bool scatter_test(Method method) {
 	double *h_input, *d_input;
 	double *h_output, *d_output;
 	int    *h_map,  *d_map;
-	const double PRESET_VALUE = 10000.0;
 
-	h_input  = (double *)malloc (sizeof(double) * 10);
-	h_output = (double *)malloc (sizeof(double) * 10);
-	h_map    = (int *)   malloc (sizeof(int)    * 10);
-	cudaMalloc(&d_input, sizeof(double) * 10);
-	cudaMalloc(&d_output , sizeof(double) * 10);
-	cudaMalloc(&d_map, sizeof(int) * 10);
+	h_input  = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_output = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_map    = (int *)   malloc (sizeof(int)    * ARRAY_SIZE);
+	cudaMalloc(&d_input, sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_output , sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_map, sizeof(int) * ARRAY_SIZE);
 
 	h_map[0] = 9;
 	h_map[1] = 6;
@@ -45,30 +54,32 @@ void scatter_test() {
 	h_map[8] = 5;
 	h_map[9] = 1;
 
-	for (int i = 0; i < 10; i++) {
+	for (int i = 0; i < ARRAY_SIZE; i++) {
 		h_input[i] = 10.0 + (i + 1);
 		h_output[i] = PRESET_VALUE;
 	}
 
-	cudaMemcpy(d_input, h_input, sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_output, h_output, sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_map,   h_map,   sizeof(int) * 10,    cudaMemcpyHostToDevice);
+	cudaMemcpy(d_input, h_input, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_output, h_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_map,   h_map,   sizeof(int) * ARRAY_SIZE,    cudaMemcpyHostToDevice);
 
-	//// thrust::scatter(thrust::cuda::par, d_input, d_input + 10, d_map, d_output);
-	{
-		thrust::device_ptr<double> input_begin(d_input), input_end(d_input + 10), output_begin(d_output);
-		thrust::device_ptr<int>    map_begin(d_map);
-		thrust::scatter(thrust::cuda::par, input_begin, input_end, map_begin, output_begin);
-	}
-
-	cudaMemcpy(h_output, d_output, sizeof(double) * 10, cudaMemcpyDeviceToHost);
-
-	bool correct = true;
-	for (int i = 0; i < 10; i++)
-		if (h_output[h_map[i]] != h_input[i]) {
-			correct = false;
+	switch(method) {
+	case RAW:
+		thrust::scatter(thrust::cuda::par, d_input, d_input + ARRAY_SIZE, d_map, d_output);
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdInput(d_input), wdOutput(d_output);
+			thrust::device_ptr<int>    wdMap(d_map);
+			thrust::scatter(thrust::cuda::par, wdInput, wdInput + ARRAY_SIZE, wdMap, wdOutput);
 			break;
 		}
+	default: break;
+	}
+
+	cudaMemcpy(h_output, d_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+
+	bool result = check_scatter(h_output, h_input, h_map);
 
 	cudaFree(d_map);
 	cudaFree(d_input);
@@ -77,30 +88,43 @@ void scatter_test() {
 	free(h_output);
 	free(h_input);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
-void scatter_if_test() {
-	cout << "Scatter if test ... " << flush;
+bool check_scatter_if(const double *h_output, const double *h_input, const int *h_map, const bool *h_stencil)
+{
+	bool   h_output_visited[ARRAY_SIZE] = {0};
 
-	const double PRESET_VALUE = 10000.0;
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		if (h_stencil[i]) {
+			h_output_visited[h_map[i]] = true;
+			if (h_output[h_map[i]] != h_input[i])
+				return false;
+		}
+
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		if (!h_output_visited[i]) {
+			if (h_output[i] != PRESET_VALUE)
+				return false;
+		}
+
+	return true;
+}
+
+bool scatter_if_test(Method method) {
 	double *h_input, *d_input;
 	double *h_output, *d_output;
 	int    *h_map,  *d_map;
 	bool   *h_stencil, *d_stencil;
-	bool   h_output_visited[10] = {0};
 
-	h_input  = (double *)malloc (sizeof(double) * 10);
-	h_output = (double *)malloc (sizeof(double) * 10);
-	h_map    = (int *)   malloc (sizeof(int)    * 10);
-	h_stencil = (bool *) malloc (sizeof(bool)   * 10);
-	cudaMalloc(&d_input, sizeof(double) * 10);
-	cudaMalloc(&d_output , sizeof(double) * 10);
-	cudaMalloc(&d_map, sizeof(int) * 10);
-	cudaMalloc(&d_stencil, sizeof(bool) * 10);
+	h_input  = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_output = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_map    = (int *)   malloc (sizeof(int)    * ARRAY_SIZE);
+	h_stencil = (bool *) malloc (sizeof(bool)   * ARRAY_SIZE);
+	cudaMalloc(&d_input, sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_output , sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_map, sizeof(int) * ARRAY_SIZE);
+	cudaMalloc(&d_stencil, sizeof(bool) * ARRAY_SIZE);
 
 	h_map[0] = 9;
 	h_map[1] = 6;
@@ -113,47 +137,36 @@ void scatter_if_test() {
 	h_map[8] = 5;
 	h_map[9] = 1;
 
-	for (int i = 0; i < 10; i++) {
+	for (int i = 0; i < ARRAY_SIZE; i++) {
 		h_input[i] = 10.0 + (i + 1);
 		h_stencil[i] = ((i & 1) ? true : false);
 		h_output[i] = PRESET_VALUE;
 	}
 
-	cudaMemcpy(d_input, h_input, sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_output, h_output, sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_stencil, h_stencil, sizeof(bool) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_map,   h_map,   sizeof(int) * 10,    cudaMemcpyHostToDevice);
+	cudaMemcpy(d_input, h_input, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_output, h_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_stencil, h_stencil, sizeof(bool) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_map,   h_map,   sizeof(int) * ARRAY_SIZE,    cudaMemcpyHostToDevice);
 
-	//// thrust::scatter_if(thrust::cuda::par, d_input, d_input + 10, d_map, d_stencil, d_output);
+	switch(method)
 	{
-		thrust::device_ptr<double> input_begin(d_input), input_end(d_input + 10), output_begin(d_output);
-		thrust::device_ptr<int>    map_begin(d_map);
-		thrust::device_ptr<bool>   stencil_begin(d_stencil);
-		thrust::scatter_if(thrust::cuda::par, input_begin, input_end, map_begin, stencil_begin, output_begin, thrust::identity<bool>());
-	}
-
-	cudaMemcpy(h_output, d_output, sizeof(double) * 10, cudaMemcpyDeviceToHost);
-		//// thrust::scatter_if(h_input, h_input + 10, h_map, h_stencil, h_output, thrust::identity<bool>());
-
-	bool correct = true;
-	for (int i = 0; i < 10; i++)
-		if (h_stencil[i]) {
-			h_output_visited[h_map[i]] = true;
-			if (h_output[h_map[i]] != h_input[i]) {
-				correct = false;
-				break;
-			}
+	case RAW:
+		thrust::scatter_if(thrust::cuda::par, d_input, d_input + ARRAY_SIZE, d_map, d_stencil, d_output);
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdInput(d_input), wdOutput(d_output);
+			thrust::device_ptr<int>    wdMap(d_map);
+			thrust::device_ptr<bool>   wdStencil(d_stencil);
+			thrust::scatter_if(thrust::cuda::par, wdInput, wdInput + ARRAY_SIZE, wdMap, wdStencil, wdOutput, thrust::identity<bool>());
+			break;
 		}
-
-	if (correct) {
-		for (int i = 0; i < 10; i++)
-			if (!h_output_visited[i]) {
-				if (h_output[i] != PRESET_VALUE) {
-					correct = false;
-					break;
-				}
-			}
+	default: break;
 	}
+
+	cudaMemcpy(h_output, d_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+
+	bool result = check_scatter_if(h_output, h_input, h_map, h_stencil);
 
 	cudaFree(d_map);
 	cudaFree(d_input);
@@ -164,27 +177,29 @@ void scatter_if_test() {
 	free(h_input);
 	free(h_stencil);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
-
+	return result;
 }
 
-void gather_test() {
-	cout << "Gather test ... " << flush;
+bool check_gather(const double *h_output, const double *h_input, const int *h_map)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		if (h_output[i] != h_input[h_map[i]])
+			return false;
 
+	return true;
+}
+
+bool gather_test(Method method) {
 	double *h_input, *d_input;
 	double *h_output, *d_output;
 	int    *h_map,  *d_map;
-	const double PRESET_VALUE = 10000.0;
 
-	h_input  = (double *)malloc (sizeof(double) * 10);
-	h_output = (double *)malloc (sizeof(double) * 10);
-	h_map    = (int *)   malloc (sizeof(int)    * 10);
-	cudaMalloc(&d_input, sizeof(double) * 10);
-	cudaMalloc(&d_output , sizeof(double) * 10);
-	cudaMalloc(&d_map, sizeof(int) * 10);
+	h_input  = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_output = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_map    = (int *)   malloc (sizeof(int)    * ARRAY_SIZE);
+	cudaMalloc(&d_input, sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_output , sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_map, sizeof(int) * ARRAY_SIZE);
 
 	h_map[0] = 9;
 	h_map[1] = 6;
@@ -197,30 +212,32 @@ void gather_test() {
 	h_map[8] = 5;
 	h_map[9] = 1;
 
-	for (int i = 0; i < 10; i++) {
+	for (int i = 0; i < ARRAY_SIZE; i++) {
 		h_input[i]  = 10.0 + (i + 1);
 		h_output[i] = PRESET_VALUE;
 	}
 
-	cudaMemcpy(d_input, h_input, sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_output, h_output, sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_map,   h_map,   sizeof(int) * 10,    cudaMemcpyHostToDevice);
+	cudaMemcpy(d_input, h_input, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_output, h_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_map,   h_map,   sizeof(int) * ARRAY_SIZE,    cudaMemcpyHostToDevice);
 
-	//// thrust::gather(thrust::cuda::par, d_map, d_map + 10, d_input, d_output);
-	{
-		thrust::device_ptr<double> input_begin(d_input), output_begin(d_output);
-		thrust::device_ptr<int>    map_begin(d_map), map_end(d_map + 10);
-		thrust::gather(thrust::cuda::par, map_begin, map_end, input_begin, output_begin);
-	}
-
-	cudaMemcpy(h_output, d_output, sizeof(double) * 10, cudaMemcpyDeviceToHost);
-
-	bool correct = true;
-	for (int i = 0; i < 10; i++)
-		if (h_output[i] != h_input[h_map[i]]) {
-			correct = false;
+	switch (method) {
+	case RAW:
+		thrust::gather(thrust::cuda::par, d_map, d_map + ARRAY_SIZE, d_input, d_output);
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdInput(d_input), wdOutput(d_output);
+			thrust::device_ptr<int>    wdMap(d_map);
+			thrust::gather(thrust::cuda::par, wdMap, wdMap + ARRAY_SIZE, wdInput, wdOutput);
 			break;
 		}
+	default: break;
+	}
+
+	cudaMemcpy(h_output, d_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+
+	bool result = check_gather(h_output, h_input, h_map);
 
 	cudaFree(d_map);
 	cudaFree(d_input);
@@ -229,29 +246,37 @@ void gather_test() {
 	free(h_output);
 	free(h_input);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
-void gather_if_test() {
-	cout << "Gather if test ... " << flush;
+bool check_gather_if(const double *hOutput, const double *hInput, const int * hMap, const bool *hStencil)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (hStencil[i]) {
+			if (hOutput[i] != hInput[hMap[i]]) 
+				return false;
+		} else {
+			if (hOutput[i] != PRESET_VALUE)
+				return false;
+		}
+	}
+	return true;
+}
 
-	const double PRESET_VALUE = 10000.0;
+bool gather_if_test(Method method) {
 	double *h_input, *d_input;
 	double *h_output, *d_output;
 	int    *h_map,  *d_map;
 	bool   *h_stencil, *d_stencil;
 
-	h_input  = (double *)malloc (sizeof(double) * 10);
-	h_output = (double *)malloc (sizeof(double) * 10);
-	h_map    = (int *)   malloc (sizeof(int)    * 10);
-	h_stencil = (bool *) malloc (sizeof(bool)   * 10);
-	cudaMalloc(&d_input, sizeof(double) * 10);
-	cudaMalloc(&d_output , sizeof(double) * 10);
-	cudaMalloc(&d_map, sizeof(int) * 10);
-	cudaMalloc(&d_stencil, sizeof(bool) * 10);
+	h_input  = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_output = (double *)malloc (sizeof(double) * ARRAY_SIZE);
+	h_map    = (int *)   malloc (sizeof(int)    * ARRAY_SIZE);
+	h_stencil = (bool *) malloc (sizeof(bool)   * ARRAY_SIZE);
+	cudaMalloc(&d_input, sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_output , sizeof(double) * ARRAY_SIZE);
+	cudaMalloc(&d_map, sizeof(int) * ARRAY_SIZE);
+	cudaMalloc(&d_stencil, sizeof(bool) * ARRAY_SIZE);
 
 	h_map[0] = 9;
 	h_map[1] = 6;
@@ -264,40 +289,36 @@ void gather_if_test() {
 	h_map[8] = 5;
 	h_map[9] = 1;
 
-	for (int i = 0; i < 10; i++) {
+	for (int i = 0; i < ARRAY_SIZE; i++) {
 		h_input[i] = 10.0 + (i + 1);
 		h_stencil[i] = ((i & 1) ? true : false);
 		h_output[i] = PRESET_VALUE;
 	}
 
-	cudaMemcpy(d_input,  h_input,   sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_output, h_output,  sizeof(double) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_stencil, h_stencil, sizeof(bool) * 10, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_map,    h_map,     sizeof(int) * 10,    cudaMemcpyHostToDevice);
+	cudaMemcpy(d_input,  h_input,   sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_output, h_output,  sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_stencil, h_stencil, sizeof(bool) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_map,    h_map,     sizeof(int) * ARRAY_SIZE,    cudaMemcpyHostToDevice);
 
-	//// thrust::scatter_if(thrust::cuda::par, d_input, d_input + 10, d_map, d_stencil, d_output);
+	switch (method)
 	{
-		thrust::device_ptr<double> input_begin(d_input), output_begin(d_output);
-		thrust::device_ptr<int>    map_begin(d_map), map_end(d_map + 10);
-		thrust::device_ptr<bool>   stencil_begin(d_stencil);
-		thrust::gather_if(thrust::cuda::par, map_begin, map_end, stencil_begin, input_begin, output_begin, thrust::identity<bool>());
-	}
-
-	cudaMemcpy(h_output, d_output, sizeof(double) * 10, cudaMemcpyDeviceToHost);
-		//// thrust::scatter_if(h_input, h_input + 10, h_map, h_stencil, h_output, thrust::identity<bool>());
-
-	bool correct = true;
-	for (int i = 0; i < 10; i++) {
-		if (h_stencil[i]) {
-			if (h_output[i] != h_input[h_map[i]]) {
-				correct = false;
-				break;
-			}
-		}  else if (h_output[i] != PRESET_VALUE) {
-			correct = false;
+	case RAW:
+		thrust::scatter_if(thrust::cuda::par, d_input, d_input + ARRAY_SIZE, d_map, d_stencil, d_output);
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdInput(d_input), wdOutput(d_output);
+			thrust::device_ptr<int>    wdMap(d_map);
+			thrust::device_ptr<bool>   wdStencil(d_stencil);
+			thrust::gather_if(thrust::cuda::par, wdMap, wdMap + ARRAY_SIZE, wdStencil, wdInput, wdOutput, thrust::identity<bool>());
 			break;
 		}
+	default: break;
 	}
+
+	cudaMemcpy(h_output, d_output, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+
+	bool result = check_gather_if(h_output, h_input, h_map, h_stencil);
 
 	cudaFree(d_map);
 	cudaFree(d_input);
@@ -308,18 +329,18 @@ void gather_if_test() {
 	free(h_input);
 	free(h_stencil);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
-
+	return result;
 }
 
 int main(int argc, char **argv) 
 {
-	scatter_test();
-	scatter_if_test();
-	gather_test();
-	gather_if_test();
+	std::cout << "Scatter DR ... " << std::flush << scatter_test(RAW) << std::endl;
+	std::cout << "Scatter DW ... " << std::flush << scatter_test(WRAPPED) << std::endl;
+	std::cout << "Scatter_if DR ... " << std::flush << scatter_if_test(RAW) << std::endl;
+	std::cout << "Scatter_if DW ... " << std::flush << scatter_if_test(WRAPPED) << std::endl;
+	std::cout << "Gather DR ... " << std::flush << gather_test(RAW) << std::endl;
+	std::cout << "Gather DW ... " << std::flush << gather_test(WRAPPED) << std::endl;
+	std::cout << "Gather_if DR ... " << std::flush << gather_if_test(RAW) << std::endl;
+	std::cout << "Gather_if DW ... " << std::flush << gather_if_test(WRAPPED) << std::endl;
 	return 0;
 }
