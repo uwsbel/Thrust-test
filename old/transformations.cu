@@ -14,65 +14,86 @@
 #include <thrust/execution_policy.h>
 #include <thrust/system/cuda/execution_policy.h>
 
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::flush;
+const int ARRAY_SIZE = 1000;
 
-void transform_test() {
-	cout << "Transform ... " << flush;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
-	const int ARRAY_SIZE = 1000;
+// ------------------------------------------------------------------------------------
 
-	double *hA, *dA;
+bool check_transform(double* hA)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (hA[i] != - 1.0 * (i + 1))
+			return false;
+	}
+
+	return true;
+}
+
+bool transform_test(Method method)
+{
+	double *hA;
 	hA = (double *) malloc(ARRAY_SIZE * sizeof(double));
-	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
-
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		hA[i] = 1.0 * (i + 1);
 
+	double* dA;
+	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
-	/* FIXME: it is not correct to use
-	thrust::transform(thrust::cuda::par, dA, dA + ARRAY_SIZE, dA, thrust::negate<double>());
-	*/
-	{
-		thrust::device_ptr<double> A_begin(dA);
-		thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
-		thrust::transform(thrust::cuda::par, A_begin, A_end, A_begin, thrust::negate<double>());
-	}
-	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
 
-	bool correct = true;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		if (hA[i] != - 1.0 * (i + 1)) {
-			correct = false;
+	switch (method) {
+	case RAW:
+		{
+			thrust::transform(thrust::cuda::par, dA, dA + ARRAY_SIZE, dA, thrust::negate<double>());
 			break;
 		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> A_begin(dA);
+			thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
+			thrust::transform(thrust::cuda::par, A_begin, A_end, A_begin, thrust::negate<double>());
+			break;
+		}
+	}
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_transform(hA);
 
 	cudaFree(dA);
 	free(hA);
+
+	return result;
 }
 
-void transform_if_test() {
-	cout << "Transform if ... " << flush;
+// ------------------------------------------------------------------------------------
 
-	const int ARRAY_SIZE = 1000;
+bool check_transform_if(double* hA)
+{
+	for (int i = 0; i < (ARRAY_SIZE >> 1); i++) {
+		if (hA[i] != 2.0 * (i + 1))
+			return false;
+	}
 
-	double *hA, *dA, *hB, *dB;
-	int *h_stencil, *d_stencil;
+	for (int i = (ARRAY_SIZE >> 1); i < ARRAY_SIZE; i++) {
+		if (hA[i] != 1.0 * (i + 1))
+			return false;
+	}
 
+	return true;
+}
+
+
+bool transform_if_test(Method method)
+{
+	double* hA;
+	double* hB;
+	int*    h_stencil;
 	hA = (double *) malloc(ARRAY_SIZE * sizeof(double));
-	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
 	hB = (double *) malloc(ARRAY_SIZE * sizeof(double));
-	cudaMalloc(&dB, ARRAY_SIZE * sizeof(double));
 	h_stencil = (int *) malloc(ARRAY_SIZE * sizeof(int));
-	cudaMalloc(&d_stencil, ARRAY_SIZE * sizeof(int));
-
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		hB[i] = hA[i] = 1.0 * (i + 1);
 
@@ -83,35 +104,35 @@ void transform_if_test() {
 			h_stencil[i] = 0;
 	}
 
+	double* dA;
+	double* dB;
+	int*    d_stencil;
+	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
+	cudaMalloc(&dB, ARRAY_SIZE * sizeof(double));
+	cudaMalloc(&d_stencil, ARRAY_SIZE * sizeof(int));
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 	cudaMemcpy(dB, hB, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_stencil, h_stencil, sizeof(int) * ARRAY_SIZE, cudaMemcpyHostToDevice);
-	/* FIXME: it is not correct to use
-	thrust::transform_if(thrust::cuda::par, dA, dA + ARRAY_SIZE, dB, d_stencil, dA, thrust::plus<double>(), thrust::identity<int>());
-	*/
-	{
-		thrust::device_ptr<double> A_begin(dA);
-		thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
-		thrust::device_ptr<double> B_begin(dB);
-		thrust::device_ptr<int>    stencil_begin(d_stencil);
-		thrust::transform_if(thrust::cuda::par, A_begin, A_end, B_begin, stencil_begin, A_begin, thrust::plus<double>(), thrust::identity<int>());
-	}
-	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
 
-	bool correct = true;
-	for (int i = 0; i < (ARRAY_SIZE >> 1); i++)
-		if (hA[i] != 2.0 * (i + 1)) {
-			correct = false;
+	switch (method) {
+	case RAW:
+		{
+			thrust::transform_if(thrust::cuda::par, dA, dA + ARRAY_SIZE, dB, d_stencil, dA, thrust::plus<double>(), thrust::identity<int>());
 			break;
 		}
-
-	if (correct) {
-		for (int i = (ARRAY_SIZE >> 1); i < ARRAY_SIZE; i++)
-			if (hA[i] != 1.0 * (i + 1)) {
-				correct = false;
-				break;
-			}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> A_begin(dA);
+			thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
+			thrust::device_ptr<double> B_begin(dB);
+			thrust::device_ptr<int>    stencil_begin(d_stencil);
+			thrust::transform_if(thrust::cuda::par, A_begin, A_end, B_begin, stencil_begin, A_begin, thrust::plus<double>(), thrust::identity<int>());
+			break;
+		}
 	}
+
+	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_transform_if(hA);
 
 	cudaFree(dA);
 	cudaFree(dB);
@@ -120,15 +141,18 @@ void transform_if_test() {
 	free(hB);
 	free(h_stencil);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
+
+// ------------------------------------------------------------------------------------
 
 int main(int argc, char **argv) 
 {
-	transform_test();
-	transform_if_test();
+	std::cout << "Transform DR ... " << std::flush << transform_test(RAW) << std::endl;
+	std::cout << "Transform DW ... " << std::flush << transform_test(WRAPPED) << std::endl;
+
+	std::cout << "Transform_if DR ... " << std::flush << transform_if_test(RAW) << std::endl;
+	std::cout << "Transform_if DW ... " << std::flush << transform_if_test(WRAPPED) << std::endl;
+
 	return 0;
 }
