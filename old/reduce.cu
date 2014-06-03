@@ -30,7 +30,7 @@ bool reduce_test(Method method)
 		hA[i] = 1.0 * (i + 1);
 
 	double* dA;
-	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
+	cudaMalloc((void **) &dA, ARRAY_SIZE * sizeof(double));
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 
 	double maximum;
@@ -42,8 +42,8 @@ bool reduce_test(Method method)
 		}
 	case WRAPPED:
 		{
-			thrust::device_ptr<double> A_begin(dA), A_end(dA + ARRAY_SIZE);
-			maximum = thrust::reduce(A_begin, A_end, 0.0, thrust::maximum<double>());
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			maximum = thrust::reduce(wdA, wdA + ARRAY_SIZE, 0.0, thrust::maximum<double>());
 			break;
 		}
 	}

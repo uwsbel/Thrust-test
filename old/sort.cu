@@ -19,118 +19,172 @@ using std::cerr;
 using std::endl;
 using std::flush;
 
-void sort_test(bool decrease = false) {
-	cout << "Sort ";
-	if (decrease)
-		cout << "non-increasingly ... " << flush;
-	else
-		cout << "non-decreasingly ... " << flush;
+const int ARRAY_SIZE = 1000;
 
-	const int ARRAY_SIZE = 1000;
+enum Order {
+	ASCENDING,
+	DESCENDING
+};
 
-	double *hA, *dA;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
+// ------------------------------------------------------------------------------------
+
+bool check_sort(Order order, double* hA)
+{
+	switch (order) {
+	case ASCENDING:
+		for (int i = 1; i < ARRAY_SIZE; i++) {
+			if (hA[i] < hA[i-1])
+				return false;
+		}
+		break;
+	case DESCENDING:
+		for (int i = 1; i < ARRAY_SIZE; i++) {
+			if (hA[i] > hA[i-1])
+				return false;
+		}
+		break;
+	}
+
+	return true;
+}
+
+bool sort_test(Order order, Method method)
+{
+	double* hA;
 	hA = (double *) malloc (sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dA, sizeof(double) * ARRAY_SIZE);
-
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		hA[i] = 1.0 * (rand() % ARRAY_SIZE);
 
+	double* dA;
+	cudaMalloc((void **) &dA, sizeof(double) * ARRAY_SIZE);
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 
-	if (decrease) {
-		thrust::device_ptr<double> dA_begin = thrust::device_pointer_cast(dA);
-		thrust::device_ptr<double> dA_end   = thrust::device_pointer_cast(dA + ARRAY_SIZE);
-		thrust::sort(thrust::cuda::par, dA_begin, dA_end, thrust::greater<double>());
-
-		/* FIXME: The program gets seg-fault if we do:
-		   thrust::sort(thrust::cuda::par, dA, dA + ARRAY_SIZE, thrust::greater<double>());
-		   which does not seem to make much sense.
-		   */
-	}
-	else
-		thrust::sort(thrust::cuda::par, dA, dA + ARRAY_SIZE);
-
-	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
-
-	bool correct = true;
-	for (int i = 1; i < ARRAY_SIZE; i++)
-		if (decrease ? (hA[i] > hA[i-1]) : (hA[i] < hA[i-1])) {
-			correct = false;
+	switch (method) {
+	case RAW:
+		{
+			switch (order) {
+			case ASCENDING:
+				thrust::sort(thrust::cuda::par, dA, dA + ARRAY_SIZE);
+				break;
+			case DESCENDING:
+				//// NOTE: this seg-faults!!!
+				thrust::sort(thrust::cuda::par, dA, dA + ARRAY_SIZE, thrust::greater<double>());
+				break;
+			}
 			break;
 		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			switch (order) {
+			case ASCENDING:
+				thrust::sort(wdA, wdA + ARRAY_SIZE);
+				break;
+			case DESCENDING:
+				thrust::sort(wdA, wdA + ARRAY_SIZE, thrust::greater<double>());
+				break;
+			}
+			break;
+		}
+	}
+
+	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_sort(order, hA);
 
 	cudaFree(dA);
 	free(hA);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
-void sort_by_key_test(bool decrease = false) {
-	cout << "Sort by key ";
-	if (decrease)
-		cout << "non-increasingly ... " << endl;
-	else
-		cout << "non-decreasingly ... " << endl;
+// ------------------------------------------------------------------------------------
 
-	const int ARRAY_SIZE = 10;
+void sort_by_key_test(Order order, Method method)
+{
+	const int SIZE = 10;
 
-	int    *h_keys,   *d_keys;
-	double *h_values, *d_values;
+	int hK[SIZE] = {0, 2, 1, 4, 2, 4, 0, 1, 4, 2};
+	double hV[SIZE] = {8, 2, 8, 7, 8, 3, 5, 3, 7, 4};
+	std::cout << "     ";
+	for (int i = 0; i < SIZE; i++)
+		std::cout << "(" << hK[i] << ", " << hV[i] << ") ";
+	std::cout << std::endl;
 
-	h_keys = (int *)malloc(sizeof(int) * ARRAY_SIZE);
-	h_values = (double *)malloc(sizeof(double) * ARRAY_SIZE);
+	int* dK;
+	double* dV;
+	cudaMalloc((void **) &dK, sizeof(int) * SIZE);
+	cudaMalloc((void **) &dV, sizeof(double) * SIZE);
+	cudaMemcpy(dK, hK, sizeof(int) * SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(dV, hV, sizeof(double) * SIZE, cudaMemcpyHostToDevice);
 
-	cudaMalloc(&d_keys, sizeof(int) * ARRAY_SIZE);
-	cudaMalloc(&d_values, sizeof(double) * ARRAY_SIZE);
-
-	cout << "Before: " << endl;
-	for (int i = 0; i < ARRAY_SIZE; i++) {
-		h_keys[i] = rand() % (ARRAY_SIZE >> 1);
-		h_values[i] = 1.0 * (rand() % ARRAY_SIZE);
-		cout << "(" << h_keys[i] << ", " << h_values[i] << ") ";
+	switch (method) {
+	case RAW:
+		{
+			switch (order) {
+			case ASCENDING:
+				thrust::sort_by_key(thrust::cuda::par, dK, dK + SIZE, dV);
+				break;
+			case DESCENDING:
+				thrust::sort_by_key(thrust::cuda::par, dK, dK + SIZE, dV, thrust::greater<int>());
+				break;
+			}
+			break;
+		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<int> wdK = thrust::device_pointer_cast(dK);
+			thrust::device_ptr<double> wdV = thrust::device_pointer_cast(dV);
+			switch (order) {
+			case ASCENDING:
+				thrust::sort_by_key(wdK, wdK + SIZE, wdV);
+				break;
+			case DESCENDING:
+				thrust::sort_by_key(wdK, wdK + SIZE, wdV, thrust::greater<int>());
+				break;
+			}
+			break;
+		}
 	}
-	cout << endl;
 
-	cudaMemcpy(d_keys, h_keys, sizeof(int) * ARRAY_SIZE, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_values, h_values, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
+	cudaMemcpy(hK, dK, sizeof(int) * SIZE, cudaMemcpyDeviceToHost);
+	cudaMemcpy(hV, dV, sizeof(double) * SIZE, cudaMemcpyDeviceToHost);
+	std::cout << "     ";
+	for (int i = 0; i < SIZE; i++)
+		std::cout << "(" << hK[i] << ", " << hV[i] << ") ";
+	std::cout << std::endl;
 
-	if (decrease) {
-		thrust::device_ptr<int> keys_begin = thrust::device_pointer_cast(d_keys);
-		thrust::device_ptr<int> keys_end   = thrust::device_pointer_cast(d_keys + ARRAY_SIZE);
-		thrust::device_ptr<double> values_begin = thrust::device_pointer_cast(d_values);
-		thrust::sort_by_key(thrust::cuda::par, keys_begin, keys_end, values_begin, thrust::greater<int>());
-		/* FIXME: The program gets wrong results if we do:
-		   thrust::sort_by_key(thrust::cuda::par, d_keys, d_keys + ARRAY_SIZE, d_values, thrust::greater<int>());
-		   which does not seem to make much sense.
-		   */
-	}
-	else
-		thrust::sort_by_key(thrust::cuda::par, d_keys, d_keys + ARRAY_SIZE, d_values);
-
-	cudaMemcpy(h_keys, d_keys, sizeof(int) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_values, d_values, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
-
-	cout << "After: " << endl;
-	for (int i = 0; i < ARRAY_SIZE; i++) {
-		cout << "(" << h_keys[i] << ", " << h_values[i] << ") ";
-	}
-	cout << endl;
-
-	cudaFree(d_keys);
-	cudaFree(d_values);
-	free(h_keys);
-	free(h_values);
+	cudaFree(dK);
+	cudaFree(dV);
 }
+
+// ------------------------------------------------------------------------------------
 
 int main(int argc, char **argv)
 {
-	sort_test(false);
-	sort_test(true);
-	sort_by_key_test(false);
-	sort_by_key_test(true);
+	std::cout << "Sort ascending DR ...  " << std::flush << sort_test(ASCENDING, RAW) << std::endl;
+	//std::cout << "Sort descending DR ... " << std::flush << sort_test(DESCENDING, RAW) << std::endl;
+
+	std::cout << "Sort ascending DW ...  " << std::flush << sort_test(ASCENDING, WRAPPED) << std::endl;
+	std::cout << "Sort descending DW ... " << std::flush << sort_test(DESCENDING, WRAPPED) << std::endl;
+
+	std::cout << std::endl << std::endl;
+
+	std::cout << "Sort_by_key ascending DR:" << std::endl;
+	sort_by_key_test(ASCENDING, RAW);
+	std::cout << "Sort_by_key descending DR:" << std::endl;
+	sort_by_key_test(DESCENDING, RAW);
+
+	std::cout << std::endl << std::endl;
+
+	std::cout << "Sort_by_key ascending DW:" << std::endl;
+	sort_by_key_test(ASCENDING, WRAPPED);
+	std::cout << "Sort_by_key descending DW:" << std::endl;
+	sort_by_key_test(DESCENDING, WRAPPED);
+
 	return 0;
 }

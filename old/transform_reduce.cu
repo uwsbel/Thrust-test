@@ -15,55 +15,65 @@
 #include <thrust/inner_product.h>
 #include <thrust/system/cuda/execution_policy.h>
 
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::flush;
+const int ARRAY_SIZE = 1000;
 
-void inner_product_test() {
-	cout << "Inner product test ... " << flush;
-	const int ARRAY_SIZE = 1000;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
-	double *hA, *dA, *dB, *hB;
-
-	hA = (double *)malloc(sizeof(double) * ARRAY_SIZE);
-	hB = (double *)malloc(sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dA, sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dB, sizeof(double) * ARRAY_SIZE);
-
+bool inner_product_test(Method method)
+{
+	double* hA;
+	double* hB;
+	hA = (double *) malloc(sizeof(double) * ARRAY_SIZE);
+	hB = (double *) malloc(sizeof(double) * ARRAY_SIZE);
 	for (int i = 0; i < ARRAY_SIZE; i++) {
 		hA[i] = 1.0 * (i+1);
 		hB[i] = 1.0 * (ARRAY_SIZE - i);
 	}
 
+	double* dA;
+	double* dB;
+	cudaMalloc((void **) &dA, sizeof(double) * ARRAY_SIZE);
+	cudaMalloc((void **) &dB, sizeof(double) * ARRAY_SIZE);
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 	cudaMemcpy(dB, hB, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 
-	//// double inner_product = thrust::inner_product(thrust::cuda::par, dA, dA + ARRAY_SIZE, dB, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
 	double inner_product;
-	{
-		thrust::device_ptr<double> A_begin(dA), A_end(dA + ARRAY_SIZE), B_begin(dB);
-		inner_product = thrust::inner_product(thrust::cuda::par, A_begin, A_end, B_begin, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
+	switch (method) {
+	case RAW:
+		{
+			inner_product = thrust::inner_product(thrust::cuda::par, dA, dA + ARRAY_SIZE, dB, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
+			break;
+		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::device_ptr<double> wdB = thrust::device_pointer_cast(dB);
+			inner_product = thrust::inner_product(wdA, wdA + ARRAY_SIZE, wdB, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
+			break;
+		}
 	}
-	double ref_inner_product = 0.0;
 
+	double ref_inner_product = 0.0;
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		ref_inner_product += hA[i] * hB[i];
 
-	bool correct = (fabs(inner_product - ref_inner_product) / fabs(ref_inner_product) < 1e-10);
+	bool result = (fabs(inner_product - ref_inner_product) / fabs(ref_inner_product) < 1e-10);
 
 	cudaFree(dA);
 	cudaFree(dB);
 	free(hA);
 	free(hB);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
-int main(int argc, char **argv) {
-	inner_product_test();
+int main(int argc, char **argv)
+{
+	std::cout << "Inner_product DR ... " << std::flush << inner_product_test(RAW) << std::endl;
+	std::cout << "Inner_product DW ... " << std::flush << inner_product_test(WRAPPED) << std::endl;
+
 	return 0;
 }

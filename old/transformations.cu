@@ -41,7 +41,7 @@ bool transform_test(Method method)
 		hA[i] = 1.0 * (i + 1);
 
 	double* dA;
-	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
+	cudaMalloc((void **) &dA, ARRAY_SIZE * sizeof(double));
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 
 	switch (method) {
@@ -52,9 +52,8 @@ bool transform_test(Method method)
 		}
 	case WRAPPED:
 		{
-			thrust::device_ptr<double> A_begin(dA);
-			thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
-			thrust::transform(thrust::cuda::par, A_begin, A_end, A_begin, thrust::negate<double>());
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::transform(wdA, wdA + ARRAY_SIZE, wdA, thrust::negate<double>());
 			break;
 		}
 	}
@@ -85,7 +84,6 @@ bool check_transform_if(double* hA)
 	return true;
 }
 
-
 bool transform_if_test(Method method)
 {
 	double* hA;
@@ -107,9 +105,9 @@ bool transform_if_test(Method method)
 	double* dA;
 	double* dB;
 	int*    d_stencil;
-	cudaMalloc(&dA, ARRAY_SIZE * sizeof(double));
-	cudaMalloc(&dB, ARRAY_SIZE * sizeof(double));
-	cudaMalloc(&d_stencil, ARRAY_SIZE * sizeof(int));
+	cudaMalloc((void **) &dA, ARRAY_SIZE * sizeof(double));
+	cudaMalloc((void **) &dB, ARRAY_SIZE * sizeof(double));
+	cudaMalloc((void **) &d_stencil, ARRAY_SIZE * sizeof(int));
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 	cudaMemcpy(dB, hB, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_stencil, h_stencil, sizeof(int) * ARRAY_SIZE, cudaMemcpyHostToDevice);
@@ -122,11 +120,10 @@ bool transform_if_test(Method method)
 		}
 	case WRAPPED:
 		{
-			thrust::device_ptr<double> A_begin(dA);
-			thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
-			thrust::device_ptr<double> B_begin(dB);
-			thrust::device_ptr<int>    stencil_begin(d_stencil);
-			thrust::transform_if(thrust::cuda::par, A_begin, A_end, B_begin, stencil_begin, A_begin, thrust::plus<double>(), thrust::identity<int>());
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::device_ptr<double> wdB = thrust::device_pointer_cast(dB);
+			thrust::device_ptr<int> wdS = thrust::device_pointer_cast(d_stencil);
+			thrust::transform_if(wdA, wdA + ARRAY_SIZE, wdB, wdS, wdA, thrust::plus<double>(), thrust::identity<int>());
 			break;
 		}
 	}
@@ -146,13 +143,106 @@ bool transform_if_test(Method method)
 
 // ------------------------------------------------------------------------------------
 
-int main(int argc, char **argv) 
+bool check_sequence(double* hA)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (hA[i] != 1.0 * i)
+			return false;
+	}
+
+	return true;
+}
+
+bool sequence_test(Method method) {
+	double* hA;
+	hA = (double *) malloc(sizeof(double) * ARRAY_SIZE);
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		hA[i] = 0.0;
+
+	double* dA;
+	cudaMalloc((void **) &dA, sizeof(double) * ARRAY_SIZE);
+
+	switch (method) {
+	case RAW:
+		{
+			thrust::sequence(thrust::cuda::par, dA, dA + ARRAY_SIZE);
+			break;
+		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::sequence(wdA, wdA + ARRAY_SIZE);
+			break;
+		}
+	}
+
+	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_sequence(hA);
+
+	free(hA);
+	cudaFree(dA);
+
+	return result;
+}
+
+
+// ------------------------------------------------------------------------------------
+
+bool check_tabulate(double* hA)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (hA[i] != -1.0 * i)
+			return false;
+	}
+
+	return true;
+}
+
+bool tabulate_test(Method method) {
+	double* hA;
+	hA = (double *) malloc(sizeof(double) * ARRAY_SIZE);
+
+	double* dA;
+	cudaMalloc((void **) &dA, sizeof(double) * ARRAY_SIZE);
+
+	switch (method) {
+	case RAW:
+		{
+			thrust::tabulate(thrust::cuda::par, dA, dA + ARRAY_SIZE, thrust::negate<double>());
+			break;
+		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::tabulate(wdA, wdA + ARRAY_SIZE, thrust::negate<double>());
+			break;
+		}
+	}
+
+	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_tabulate(hA);
+
+	free(hA);
+	cudaFree(dA);
+
+	return result;
+}
+
+// ------------------------------------------------------------------------------------
+
+int main(int argc, char **argv)
 {
 	std::cout << "Transform DR ... " << std::flush << transform_test(RAW) << std::endl;
 	std::cout << "Transform DW ... " << std::flush << transform_test(WRAPPED) << std::endl;
 
 	std::cout << "Transform_if DR ... " << std::flush << transform_if_test(RAW) << std::endl;
 	std::cout << "Transform_if DW ... " << std::flush << transform_if_test(WRAPPED) << std::endl;
+
+	std::cout << "Sequence DR ... " << std::flush << sequence_test(RAW) << std::endl;
+	std::cout << "Sequence DW ... " << std::flush << sequence_test(WRAPPED) << std::endl;
+
+	std::cout << "Tabulate DR ... " << std::flush << tabulate_test(RAW) << std::endl;
+	std::cout << "Tabulate DW ... " << std::flush << tabulate_test(WRAPPED) << std::endl;
 
 	return 0;
 }

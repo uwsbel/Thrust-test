@@ -14,127 +14,123 @@
 #include <thrust/execution_policy.h>
 #include <thrust/system/cuda/execution_policy.h>
 
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::flush;
+const int ARRAY_SIZE = 1000;
 
-void fill_test() {
-	cout << "Fill test ... " << flush;
-	const int ARRAY_SIZE = 1000;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
-	double *hA, *dA;
+// ------------------------------------------------------------------------------------
 
-	hA = (double *)malloc(sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dA, sizeof(double) * ARRAY_SIZE);
+bool check_fill(double* hA)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (hA[i] != 9.0)
+			return false;
+	}
 
+	return true;
+}
+
+bool fill_test(Method method)
+{
+	double* hA;
+	hA = (double *) malloc(sizeof(double) * ARRAY_SIZE);
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		hA[i] = 0.0;
 
+	double* dA;
+	cudaMalloc((void **) &dA, sizeof(double) * ARRAY_SIZE);
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
-	thrust::fill(thrust::cuda::par, dA, dA + ARRAY_SIZE, 9.0);
-	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
 
-	bool correct = true;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		if (hA[i] != 9.0) {
-			correct = false;
+	switch (method) {
+	case RAW:
+		{
+			thrust::fill(thrust::cuda::par, dA, dA + ARRAY_SIZE, 9.0);
 			break;
 		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::fill(wdA, wdA + ARRAY_SIZE, 9.0);
+			break;
+		}
+	}
+
+	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_fill(hA);
 
 	free(hA);
 	cudaFree(dA);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
-
+	return result;
 }
 
-void copy_test() {
-	cout << "Copy test ... " << flush;
+// ------------------------------------------------------------------------------------
 
-	const int ARRAY_SIZE = 1000;
+bool check_copy(double* hB)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (hB[i] != 1.0 * (i + 1))
+			return false;
+	}
 
-	double *hA, *dA, *dB, *hB;
+	return true;
+}
 
-	hA = (double *)malloc(sizeof(double) * ARRAY_SIZE);
-	hB = (double *)malloc(sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dA, sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dB, sizeof(double) * ARRAY_SIZE);
-
+bool copy_test(Method method)
+{
+	double* hA;
+	double* hB;
+	hA = (double *) malloc(sizeof(double) * ARRAY_SIZE);
+	hB = (double *) malloc(sizeof(double) * ARRAY_SIZE);
 	for (int i = 0; i < ARRAY_SIZE; i++) {
 		hA[i] = 1.0 * (i+1);
 		hB[i] = 0.0;
 	}
 
+	double* dA;
+	double* dB;
+	cudaMalloc((void **) &dA, sizeof(double) * ARRAY_SIZE);
+	cudaMalloc((void **) &dB, sizeof(double) * ARRAY_SIZE);
 	cudaMemcpy(dA, hA, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
 	cudaMemcpy(dB, hB, sizeof(double) * ARRAY_SIZE, cudaMemcpyHostToDevice);
-	thrust::copy(thrust::cuda::par, dA, dA + ARRAY_SIZE, dB);
-	cudaMemcpy(hB, dB, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
 
-	bool correct = true;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		if (hB[i] != 1.0 * (i + 1)) {
-			correct = false;
+	switch (method) {
+	case RAW:
+		{
+			thrust::copy(thrust::cuda::par, dA, dA + ARRAY_SIZE, dB);
 			break;
 		}
-
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
-
-	free(hA);
-	cudaFree(dA);
-	free(hB);
-	cudaFree(dB);
-}
-
-void sequence_test() {
-	cout << "Sequence test ... " << flush;
-
-	const int ARRAY_SIZE = 1000;
-
-	double *hA, *dA;
-
-	hA = (double *)malloc(sizeof(double) * ARRAY_SIZE);
-	cudaMalloc(&dA, sizeof(double) * ARRAY_SIZE);
-
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		hA[i] = 0.0;
-
-	/* FIXME: it's not correct to call
-	    thrust::sequence(thrust::cuda::par, dA, dA + ARRAY_SIZE);
-	   */
-	{
-		thrust::device_ptr<double> A_begin(dA);
-		thrust::device_ptr<double> A_end(dA + ARRAY_SIZE);
-		thrust::sequence(thrust::cuda::par, A_begin, A_end);
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wdA = thrust::device_pointer_cast(dA);
+			thrust::device_ptr<double> wdB = thrust::device_pointer_cast(dB);
+			thrust::copy(wdA, wdA + ARRAY_SIZE, wdB);
+		}
 	}
-	cudaMemcpy(hA, dA, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
 
-	bool correct = true;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		if (hA[i] != 1.0 * i) {
-			correct = false;
-			break;
-		}
-
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	cudaMemcpy(hB, dB, sizeof(double) * ARRAY_SIZE, cudaMemcpyDeviceToHost);
+	bool result = check_copy(hB);
 
 	free(hA);
+	free(hB);
 	cudaFree(dA);
+	cudaFree(dB);
+
+	return result;
 }
 
-int main(int argc, char **argv) 
+// ------------------------------------------------------------------------------------
+
+int main(int argc, char **argv)
 {
-	fill_test();
-	copy_test();
-	sequence_test();
+	std::cout << "Fill DR ... " << std::flush << fill_test(RAW) << std::endl;
+	std::cout << "Fill DW ... " << std::flush << fill_test(WRAPPED) << std::endl;
+
+	std::cout << "Copy DR ... " << std::flush << copy_test(RAW) << std::endl;
+	std::cout << "Copy DW ... " << std::flush << copy_test(WRAPPED) << std::endl;
+
 	return 0;
 }
