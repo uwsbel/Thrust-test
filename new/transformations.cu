@@ -14,52 +14,71 @@
 #include <thrust/execution_policy.h>
 #include <thrust/system/cuda/execution_policy.h>
 
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::flush;
+const int ARRAY_SIZE = 1000;
 
-void transform_test() {
-	cout << "Transform test ... " << flush;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
-	const int ARRAY_SIZE = 1000;
+bool check_transform(double* mA)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++) {
+		if (mA[i] != - 1.0 * (i + 1))
+			return false;
+	}
 
+	return true;
+}
+
+bool transform_test(Method method)
+{
 	double *mA;
 	cudaMallocManaged(&mA, ARRAY_SIZE * sizeof(double));
 
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		mA[i] = 1.0 * (i + 1);
 
-	/* FIXME: it is not correct to use
-	thrust::transform(thrust::cuda::par, mA, mA + ARRAY_SIZE, mA, thrust::negate<double>());
-	*/
-	{
-		thrust::device_ptr<double> A_begin(mA);
-		thrust::device_ptr<double> A_end(mA + ARRAY_SIZE);
-		thrust::transform(thrust::cuda::par, A_begin, A_end, A_begin, thrust::negate<double>());
+	switch (method) {
+	case RAW:
+		thrust::transform(thrust::cuda::par, mA, mA + ARRAY_SIZE, mA, thrust::negate<double>());
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> A_begin(mA);
+			thrust::device_ptr<double> A_end(mA + ARRAY_SIZE);
+			thrust::transform(thrust::cuda::par, A_begin, A_end, A_begin, thrust::negate<double>());
+			break;
+		}
+	default:
+		break;
 	}
 	cudaDeviceSynchronize();
 
-	bool correct = true;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		if (mA[i] != - 1.0 * (i + 1)) {
-			correct = false;
-			break;
-		}
+	bool result = check_transform(mA);
 
 	cudaFree(mA);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
-void transform_if_test() {
-	cout << "Transform if test ... " << flush;
+bool check_transform_if(double* mA)
+{
+	for (int i = 0; i < (ARRAY_SIZE >> 1); i++) {
+		if (mA[i] != 2.0 * (i + 1))
+			return false;
+	}
 
-	const int ARRAY_SIZE = 1000;
+	for (int i = (ARRAY_SIZE >> 1); i < ARRAY_SIZE; i++) {
+		if (mA[i] != 1.0 * (i + 1))
+			return false;
+	}
 
+	return true;
+}
+
+bool transform_if_test(Method method)
+{
 	double *mA, *mB;
 	int *m_stencil;
 
@@ -77,47 +96,121 @@ void transform_if_test() {
 			m_stencil[i] = 0;
 	}
 
-	/* FIXME: it is not correct to use 
-	thrust::transform_if(thrust::cuda::par, mA, mA + ARRAY_SIZE, mB, m_stencil, mA, thrust::plus<double>(), thrust::identity<int>());
-	*/
-
-	{ 
-		thrust::device_ptr<double> A_begin(mA);
-		thrust::device_ptr<double> A_end(mA + ARRAY_SIZE);
-		thrust::device_ptr<double> B_begin(mB);
-		thrust::device_ptr<int>    stencil_begin(m_stencil);
-		thrust::transform_if(thrust::cuda::par, A_begin, A_end, B_begin, stencil_begin, A_begin, thrust::plus<double>(), thrust::identity<int>());
+	switch (method) {
+	case RAW:
+		thrust::transform_if(thrust::cuda::par, mA, mA + ARRAY_SIZE, mB, m_stencil, mA, thrust::plus<double>(), thrust::identity<int>());
+		break;
+	case WRAPPED:
+		{ 
+			thrust::device_ptr<double> A_begin(mA);
+			thrust::device_ptr<double> A_end(mA + ARRAY_SIZE);
+			thrust::device_ptr<double> B_begin(mB);
+			thrust::device_ptr<int>    stencil_begin(m_stencil);
+			thrust::transform_if(thrust::cuda::par, A_begin, A_end, B_begin, stencil_begin, A_begin, thrust::plus<double>(), thrust::identity<int>());
+			break;
+		}
+	default: break;
 	}
 	cudaDeviceSynchronize();
 
-	bool correct = true;
-	for (int i = 0; i < (ARRAY_SIZE >> 1); i++)
-		if (mA[i] != 2.0 * (i + 1)) {
-			correct = false;
-			break;
-		}
-
-	if (correct) {
-		for (int i = (ARRAY_SIZE >> 1); i < ARRAY_SIZE; i++)
-			if (mA[i] != 1.0 * (i + 1)) {
-				correct = false;
-				break;
-			}
-	}
+	bool result = check_transform_if(mA);
 
 	cudaFree(mA);
 	cudaFree(mB);
 	cudaFree(m_stencil);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
+}
+
+bool check_sequence(double *mA) {
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		if (mA[i] != 1.0 * i)
+			return false;
+
+	return true;
+}
+
+bool sequence_test(Method method) {
+	double *mA;
+
+	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
+
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		mA[i] = 0.0;
+
+	switch (method) {
+	case RAW:
+	    thrust::sequence(thrust::cuda::par, mA, mA + ARRAY_SIZE);
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> A_begin(mA);
+			thrust::device_ptr<double> A_end(mA + ARRAY_SIZE);
+			thrust::sequence(thrust::cuda::par, A_begin, A_end);
+			break;
+		}
+	default:
+		break;
+	}
+	cudaDeviceSynchronize();
+
+	bool result = check_sequence(mA);
+
+	cudaFree(mA);
+
+	return result;
+}
+
+bool check_tabulate(double *mA)
+{
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		if (mA[i] != -1.0 * i)
+			return false;
+
+	return true;
+}
+
+bool tabulate_test(Method method)
+{
+	double *mA;
+
+	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
+
+	for (int i = 0; i < ARRAY_SIZE; i++)
+		mA[i] = 0.0;
+
+	switch (method) {
+	case RAW:
+		thrust::tabulate(thrust::cuda::par, mA, mA + ARRAY_SIZE, thrust::negate<double>());
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> A_begin(mA), A_end(mA + ARRAY_SIZE);
+			thrust::tabulate(thrust::cuda::par, A_begin, A_end, thrust::negate<double>());
+			break;
+		}
+	default: break;
+	}
+	cudaDeviceSynchronize();
+
+	bool result = check_tabulate(mA);
+	cudaFree(mA);
+
+	return result;
 }
 
 int main(int argc, char **argv) 
 {
-	transform_test();
-	transform_if_test();
+	std::cout << "Transform DMR ... " << std::flush << transform_test(RAW) << std::endl;
+	std::cout << "Transform DMW ... " << std::flush << transform_test(WRAPPED) << std::endl;
+
+	std::cout << "Transform_if DMR ... " << std::flush << transform_if_test(RAW) << std::endl;
+	std::cout << "Transform_if DMW ... " << std::flush << transform_if_test(WRAPPED) << std::endl;
+
+	std::cout << "Sequence DMR ... " << std::flush << sequence_test(RAW) << std::endl;
+	std::cout << "Sequence DMW ... " << std::flush << sequence_test(WRAPPED) << std::endl;
+
+	std::cout << "Tabulate DMR ... " << std::flush << tabulate_test(RAW) << std::endl;
+	std::cout << "Tabulate DMW ... " << std::flush << tabulate_test(WRAPPED) << std::endl;
 	return 0;
 }

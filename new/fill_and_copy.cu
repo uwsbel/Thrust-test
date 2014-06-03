@@ -82,47 +82,9 @@ void copy_test() {
 
 }
 
-void sequence_test() {
-	cout << "Sequence test ... " << flush;
-
-	const int ARRAY_SIZE = 1000;
-
-	double *mA;
-
-	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
-
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		mA[i] = 0.0;
-
-	/* FIXME: it's not correct to call
-	    thrust::sequence(thrust::cuda::par, mA, mA + ARRAY_SIZE);
-	   */
-	{
-		thrust::device_ptr<double> A_begin(mA);
-		thrust::device_ptr<double> A_end(mA + ARRAY_SIZE);
-		thrust::sequence(thrust::cuda::par, A_begin, A_end);
-	}
-	cudaDeviceSynchronize();
-
-	bool correct = true;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		if (mA[i] != 1.0 * i) {
-			correct = false;
-			break;
-		}
-
-	cudaFree(mA);
-
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
-}
-
 int main(int argc, char **argv) 
 {
 	fill_test();
 	copy_test();
-	sequence_test();
 	return 0;
 }
