@@ -19,15 +19,41 @@ using std::cerr;
 using std::endl;
 using std::flush;
 
-void sort_test(bool decrease = false) {
-	cout << "Sort ";
-	if (decrease)
-		cout << "non-increasingly test ... " << flush;
-	else
-		cout << "non-decreasingly test ... " << flush;
+const int ARRAY_SIZE = 1000;
 
-	const int ARRAY_SIZE = 1000;
+enum Order {
+	ASCENDING,
+	DESCENDING
+};
 
+enum Method {
+	RAW,
+	WRAPPED
+};
+
+// ------------------------------------------------------------------------------------
+
+bool check_sort(Order order, double* mA)
+{
+	switch (order) {
+	case ASCENDING:
+		for (int i = 1; i < ARRAY_SIZE; i++) {
+			if (mA[i] < mA[i-1])
+				return false;
+		}
+		break;
+	case DESCENDING:
+		for (int i = 1; i < ARRAY_SIZE; i++) {
+			if (mA[i] > mA[i-1])
+				return false;
+		}
+		break;
+	}
+
+	return true;
+}
+
+bool sort_test(Order order, Method method) {
 	double *mA;
 
 	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
@@ -35,82 +61,151 @@ void sort_test(bool decrease = false) {
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		mA[i] = 1.0 * (rand() % ARRAY_SIZE);
 
-	if (decrease)
-		thrust::sort(thrust::cuda::par, mA, mA + ARRAY_SIZE, thrust::greater<double>());
-	else
-		thrust::sort(thrust::cuda::par, mA, mA + ARRAY_SIZE);
+	switch (method) {
+	case RAW:
+		{
+			switch (order) {
+			case ASCENDING:
+				thrust::sort(thrust::cuda::par, mA, mA + ARRAY_SIZE);
+				break;
+			case DESCENDING:
+				thrust::sort(thrust::cuda::par, mA, mA + ARRAY_SIZE, thrust::greater<double>());
+				break;
+			default: break;
+			}
+			break;
+		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wmA(mA);
+			switch (order) {
+			case ASCENDING:
+				thrust::sort(thrust::cuda::par, wmA, wmA + ARRAY_SIZE);
+				break;
+			case DESCENDING:
+				thrust::sort(thrust::cuda::par, wmA, wmA + ARRAY_SIZE, thrust::greater<double>());
+				break;
+			default: break;
+			}
+			break;
+		}
+	default: break;
+	}
 
 	cudaDeviceSynchronize();
 
-	bool correct = true;
-	for (int i = 1; i < ARRAY_SIZE; i++) {
-		if (decrease ? (mA[i] > mA[i-1]) : (mA[i] < mA[i-1])) {
-			correct = false;
-			break;
-		}
-	}
+	bool result = check_sort(order, mA);
 
 	cudaFree(mA);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
-void sort_by_key_test(bool decrease = false) {
-	cout << "Sort by key ";
-	if (decrease)
-		cout << "non-increasingly test ... " << endl;
-	else
-		cout << "non-decreasingly test ... " << endl;
+// ------------------------------------------------------------------------------------
 
-	const int ARRAY_SIZE = 10;
+void sort_by_key_test(Order order, Method method) {
+
+	const int SIZE = 10;
 
 	int    *m_keys;
 	double *m_values;
 
-	cudaMallocManaged(&m_keys, sizeof(int) * ARRAY_SIZE);
-	cudaMallocManaged(&m_values, sizeof(double) * ARRAY_SIZE);
+	cudaMallocManaged(&m_keys, sizeof(int) * SIZE);
+	cudaMallocManaged(&m_values, sizeof(double) * SIZE);
 
-	cout << "Before: " << endl;
-	for (int i = 0; i < ARRAY_SIZE; i++) {
-		m_keys[i] = rand() % (ARRAY_SIZE >> 1);
-		m_values[i] = 1.0 * (rand() % ARRAY_SIZE);
-		cout << "(" << m_keys[i] << ", " << m_values[i] << ") ";
-	}
-	cout << endl;
+	m_keys[0] = 0;
+	m_keys[1] = 2;
+	m_keys[2] = 1;
+	m_keys[3] = 4;
+	m_keys[4] = 2;
+	m_keys[5] = 4;
+	m_keys[6] = 0;
+	m_keys[7] = 1;
+	m_keys[8] = 4;
+	m_keys[9] = 2;
 
-	if (decrease) {
-		thrust::device_ptr<int> keys_begin = thrust::device_pointer_cast(m_keys);
-		thrust::device_ptr<int> keys_end   = thrust::device_pointer_cast(m_keys + ARRAY_SIZE);
-		thrust::device_ptr<double> values_begin = thrust::device_pointer_cast(m_values);
-		thrust::sort_by_key(thrust::cuda::par, keys_begin, keys_end, values_begin, thrust::greater<int>());
-		/* FIXME: The program gets wrong results if we do:
-		   thrust::sort_by_key(thrust::cuda::par, d_keys, d_keys + ARRAY_SIZE, d_values, thrust::greater<int>());
-		   which does not seem to make much sense.
-		   Also note that the behavior of sort_by_keys seems to be different from that of sort.
-		   */
+	m_values[0] = 8;
+	m_values[1] = 2;
+	m_values[2] = 8;
+	m_values[3] = 7;
+	m_values[4] = 8;
+	m_values[5] = 3;
+	m_values[6] = 5;
+	m_values[7] = 3;
+	m_values[8] = 7;
+	m_values[9] = 4;
+
+	std::cout << "     ";
+	for (int i = 0; i < SIZE; i++) 
+		std::cout << "(" << m_keys[i] << ", " << m_values[i] << ") ";
+
+	std::cout << std::endl;
+
+	switch (method) {
+	case RAW:
+		{
+			switch (order) {
+				case ASCENDING:
+					thrust::sort_by_key(thrust::cuda::par, m_keys, m_keys + SIZE, m_values);
+					break;
+				case DESCENDING:
+					thrust::sort_by_key(thrust::cuda::par, m_keys, m_keys + SIZE, m_values, thrust::greater<int>());
+					break;
+				default: break;
+			}
+			break;
+		}
+	case WRAPPED:
+		{
+			thrust::device_ptr<int> wmK = thrust::device_pointer_cast(m_keys);
+			thrust::device_ptr<double> wmV = thrust::device_pointer_cast(m_values);
+			switch (order) {
+				case ASCENDING:
+					thrust::sort_by_key(thrust::cuda::par, wmK, wmK + SIZE, wmV);
+					break;
+				case DESCENDING:
+					thrust::sort_by_key(thrust::cuda::par, wmK, wmK + SIZE, wmV , thrust::greater<int>());
+					break;
+				default: break;
+			}
+			break;
+		}
 	}
-	else
-		thrust::sort_by_key(thrust::cuda::par, m_keys, m_keys + ARRAY_SIZE, m_values);
 	cudaDeviceSynchronize();
 
-	cout << "After: " << endl;
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		cout << "(" << m_keys[i] << ", " << m_values[i] << ") ";
-	cout << endl;
+	std::cout << "     ";
+	for (int i = 0; i < SIZE; i++)
+		std::cout << "(" << m_keys[i] << ", " << m_values[i] << ") ";
+	std::cout << std::endl;
 
 
 	cudaFree(m_keys);
 	cudaFree(m_values);
 }
 
+// ------------------------------------------------------------------------------------
+
 int main(int argc, char **argv)
 {
-	sort_test(false);
-	sort_test(true);
-	sort_by_key_test(false);
-	sort_by_key_test(true);
+	std::cout << "Sort ascending DMR ...  " << std::flush << sort_test(ASCENDING, RAW) << std::endl;
+	std::cout << "Sort descending DMR ... " << std::flush << sort_test(DESCENDING, RAW) << std::endl;
+
+	std::cout << "Sort ascending DMW ...  " << std::flush << sort_test(ASCENDING, WRAPPED) << std::endl;
+	std::cout << "Sort descending DMW ... " << std::flush << sort_test(DESCENDING, WRAPPED) << std::endl;
+
+	std::cout << std::endl << std::endl;
+
+	std::cout << "Sort_by_key ascending DMR:" << std::endl;
+	sort_by_key_test(ASCENDING, RAW);
+	std::cout << "Sort_by_key descending DMR:" << std::endl;
+	sort_by_key_test(DESCENDING, RAW);
+
+	std::cout << std::endl << std::endl;
+
+	std::cout << "Sort_by_key ascending DMW:" << std::endl;
+	sort_by_key_test(ASCENDING, WRAPPED);
+	std::cout << "Sort_by_key descending DMW:" << std::endl;
+	sort_by_key_test(DESCENDING, WRAPPED);
+
 	return 0;
 }

@@ -15,15 +15,15 @@
 #include <thrust/inner_product.h>
 #include <thrust/system/cuda/execution_policy.h>
 
-using std::cout;
-using std::cerr;
-using std::endl;
-using std::flush;
+const int ARRAY_SIZE = 1000;
 
-void inner_product_test() {
-	cout << "Inner product test ... " << flush;
-	const int ARRAY_SIZE = 1000;
+enum Method {
+	RAW,
+	WRAPPED
+};
 
+bool inner_product_test(Method method)
+{
 	double *mA, *mB;
 
 	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
@@ -36,9 +36,17 @@ void inner_product_test() {
 
 	//// double inner_product = thrust::inner_product(thrust::cuda::par, mA, mA + ARRAY_SIZE, mB, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
 	double inner_product;
-	{
-		thrust::device_ptr<double> A_begin(mA), A_end(mA + ARRAY_SIZE), B_begin(mB);
-		inner_product = thrust::inner_product(thrust::cuda::par, A_begin, A_end , B_begin, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
+	switch (method) {
+	case RAW:
+		inner_product = thrust::inner_product(thrust::cuda::par, mA, mA + ARRAY_SIZE, mB, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
+		break;
+	case WRAPPED:
+		{
+			thrust::device_ptr<double> wmA(mA), wmB(mB);
+			inner_product = thrust::inner_product(thrust::cuda::par, wmA, wmA + ARRAY_SIZE, wmB, 0.0, thrust::plus<double>(), thrust::multiplies<double>());
+			break;
+		}
+	default: break;
 	}
 	cudaDeviceSynchronize();
 
@@ -47,18 +55,17 @@ void inner_product_test() {
 	for (int i = 0; i < ARRAY_SIZE; i++)
 		ref_inner_product += mA[i] * mB[i];
 
-	bool correct = (fabs(inner_product - ref_inner_product) / fabs(ref_inner_product) < 1e-10);
+	bool result = (fabs(inner_product - ref_inner_product) / fabs(ref_inner_product) < 1e-10);
 
 	cudaFree(mA);
 	cudaFree(mB);
 
-	if (correct)
-		cout << "OK" << endl;
-	else
-		cout << "Failed" << endl;
+	return result;
 }
 
 int main(int argc, char **argv) {
-	inner_product_test();
+	std::cout << "Inner_product DMR ... " << std::flush << inner_product_test(RAW) << std::endl;
+	std::cout << "Inner_product DMW ... " << std::flush << inner_product_test(WRAPPED) << std::endl;
+
 	return 0;
 }
