@@ -3,8 +3,9 @@ PROJECT(thrust_tests)
 INCLUDE(SBELUtils.cmake)
 
 enable_cuda_support()
+MESSAGE(STATUS "Cuda version: ${CUDA_VERSION}")
 
 ADD_SUBDIRECTORY(old)
-IF($CUDA_VERSION VERSION_GREATER "6.0")
+IF(NOT (${CUDA_VERSION} VERSION_LESS "6.0"))
   ADD_SUBDIRECTORY(new)
 ENDIF()
