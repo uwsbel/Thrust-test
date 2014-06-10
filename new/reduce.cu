@@ -2,6 +2,7 @@
 #include <cmath>
 #include <stdlib.h>
 
+#include <thrust/version.h>
 #include <thrust/scan.h>
 #include <thrust/functional.h>
 #include <thrust/sequence.h>
@@ -18,47 +19,51 @@
 const int ARRAY_SIZE = 1000;
 
 enum Method {
-	RAW,
-	WRAPPED
+  RAW,
+  WRAPPED
 };
 
 bool reduce_test(Method method)
 {
-	double *mA;
-	cudaMallocManaged(&mA, ARRAY_SIZE * sizeof(double));
+  double *mA;
+  cudaMallocManaged(&mA, ARRAY_SIZE * sizeof(double));
 
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		mA[i] = 1.0 * (i + 1);
+  for (int i = 0; i < ARRAY_SIZE; i++)
+    mA[i] = 1.0 * (i + 1);
 
-	double maximum;
+  double maximum;
 
-	switch (method) {
-	case RAW:
-		{
-			maximum = thrust::reduce(thrust::cuda::par, mA, mA + ARRAY_SIZE, 0.0, thrust::maximum<double>());
-			break;
-		}
-	case WRAPPED:
-		{
-			thrust::device_ptr<double> A_begin(mA), A_end(mA + ARRAY_SIZE);
-			maximum = thrust::reduce(A_begin, A_end , 0.0, thrust::maximum<double>());
-			break;
-		}
-	default:
-		break;
-	}
-	cudaDeviceSynchronize();
+  switch (method) {
+  case RAW:
+    {
+      maximum = thrust::reduce(thrust::cuda::par, mA, mA + ARRAY_SIZE, 0.0, thrust::maximum<double>());
+      break;
+    }
+  case WRAPPED:
+    {
+      thrust::device_ptr<double> A_begin(mA), A_end(mA + ARRAY_SIZE);
+      maximum = thrust::reduce(A_begin, A_end , 0.0, thrust::maximum<double>());
+      break;
+    }
+  default:
+    break;
+  }
+  cudaDeviceSynchronize();
 
-	bool result = (fabs(maximum - ARRAY_SIZE) < 1e-10);
+  bool result = (fabs(maximum - ARRAY_SIZE) < 1e-10);
 
-	cudaFree(mA);
+  cudaFree(mA);
 
-	return result;
+  return result;
 }
 
 int main(int argc, char **argv) 
 {
-	std::cout << "Reduce DMR ... " << std::flush << reduce_test(RAW) << std::endl;
-	std::cout << "Reduce DMW ... " << std::flush << reduce_test(WRAPPED) << std::endl;
-	return 0;
+  int major = THRUST_MAJOR_VERSION;
+  int minor = THRUST_MINOR_VERSION;
+  std::cout << "Thrust v" << major << "." << minor << std::endl << std::endl;
+
+  std::cout << "Reduce DMR ... " << std::flush << reduce_test(RAW) << std::endl;
+  std::cout << "Reduce DMW ... " << std::flush << reduce_test(WRAPPED) << std::endl;
+  return 0;
 }

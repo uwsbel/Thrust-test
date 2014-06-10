@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cmath>
 
+#include <thrust/version.h>
 #include <thrust/scan.h>
 #include <thrust/functional.h>
 #include <thrust/sequence.h>
@@ -17,106 +18,110 @@
 const int ARRAY_SIZE = 1000;
 
 enum Method {
-	RAW,
-	WRAPPED
+  RAW,
+  WRAPPED
 };
 
 // ------------------------------------------------------------------------------------
 
 bool check_fill(double* mA)
 {
-	for (int i = 0; i < ARRAY_SIZE; i++) {
-		if (mA[i] != 9.0)
-			return false;
-	}
+  for (int i = 0; i < ARRAY_SIZE; i++) {
+    if (mA[i] != 9.0)
+      return false;
+  }
 
-	return true;
+  return true;
 }
 
 bool fill_test(Method method) {
-	double *mA;
+  double *mA;
 
-	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
+  cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
 
-	for (int i = 0; i < ARRAY_SIZE; i++)
-		mA[i] = 0.0;
+  for (int i = 0; i < ARRAY_SIZE; i++)
+    mA[i] = 0.0;
 
-	switch (method)
-	{
-	case RAW:
-		thrust::fill(thrust::cuda::par, mA, mA + ARRAY_SIZE, 9.0);
-		break;
-	case WRAPPED:
-		{
-			thrust::device_ptr<double> wmA(mA);
-			thrust::fill(thrust::cuda::par, wmA, wmA + ARRAY_SIZE, 9.0);
-			break;
-		}
-	default: break;
-	}
-	cudaDeviceSynchronize();
+  switch (method)
+  {
+  case RAW:
+    thrust::fill(thrust::cuda::par, mA, mA + ARRAY_SIZE, 9.0);
+    break;
+  case WRAPPED:
+    {
+      thrust::device_ptr<double> wmA(mA);
+      thrust::fill(thrust::cuda::par, wmA, wmA + ARRAY_SIZE, 9.0);
+      break;
+    }
+  default: break;
+  }
+  cudaDeviceSynchronize();
 
-	bool result = check_fill(mA);
-	cudaFree(mA);
+  bool result = check_fill(mA);
+  cudaFree(mA);
 
-	return result;
+  return result;
 }
 
 // ------------------------------------------------------------------------------------
 
 bool check_copy(double* mB)
 {
-	for (int i = 0; i < ARRAY_SIZE; i++) {
-		if (mB[i] != 1.0 * (i + 1))
-			return false;
-	}
+  for (int i = 0; i < ARRAY_SIZE; i++) {
+    if (mB[i] != 1.0 * (i + 1))
+      return false;
+  }
 
-	return true;
+  return true;
 }
 
 bool copy_test(Method method) {
-	double *mA, *mB;
+  double *mA, *mB;
 
-	cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
-	cudaMallocManaged(&mB, sizeof(double) * ARRAY_SIZE);
+  cudaMallocManaged(&mA, sizeof(double) * ARRAY_SIZE);
+  cudaMallocManaged(&mB, sizeof(double) * ARRAY_SIZE);
 
-	for (int i = 0; i < ARRAY_SIZE; i++)
-	{
-		mA[i] = 1.0 * (i+1);
-		mB[i] = 0.0;
-	}
+  for (int i = 0; i < ARRAY_SIZE; i++)
+  {
+    mA[i] = 1.0 * (i+1);
+    mB[i] = 0.0;
+  }
 
-	switch (method) {
-	case RAW:
-		thrust::copy(thrust::cuda::par, mA, mA + ARRAY_SIZE, mB);
-		break;
-	case WRAPPED:
-		{
-			thrust::device_ptr<double> wmA(mA), wmB(mB);
-			thrust::copy(thrust::cuda::par, wmA, wmA + ARRAY_SIZE, wmB);
-			break;
-		}
-	default: break;
-	}
-	cudaDeviceSynchronize();
+  switch (method) {
+  case RAW:
+    thrust::copy(thrust::cuda::par, mA, mA + ARRAY_SIZE, mB);
+    break;
+  case WRAPPED:
+    {
+      thrust::device_ptr<double> wmA(mA), wmB(mB);
+      thrust::copy(thrust::cuda::par, wmA, wmA + ARRAY_SIZE, wmB);
+      break;
+    }
+  default: break;
+  }
+  cudaDeviceSynchronize();
 
-	bool result = check_copy(mB);
+  bool result = check_copy(mB);
 
-	cudaFree(mA);
-	cudaFree(mB);
+  cudaFree(mA);
+  cudaFree(mB);
 
-	return result;
+  return result;
 }
 
 // ------------------------------------------------------------------------------------
 
 int main(int argc, char **argv)
 {
-	std::cout << "Fill DMR ... " << std::flush << fill_test(RAW) << std::endl;
-	std::cout << "Fill DMW ... " << std::flush << fill_test(WRAPPED) << std::endl;
+  int major = THRUST_MAJOR_VERSION;
+  int minor = THRUST_MINOR_VERSION;
+  std::cout << "Thrust v" << major << "." << minor << std::endl << std::endl;
 
-	std::cout << "Copy DMR ... " << std::flush << copy_test(RAW) << std::endl;
-	std::cout << "Copy DMW ... " << std::flush << copy_test(WRAPPED) << std::endl;
+  std::cout << "Fill DMR ... " << std::flush << fill_test(RAW) << std::endl;
+  std::cout << "Fill DMW ... " << std::flush << fill_test(WRAPPED) << std::endl;
 
-	return 0;
+  std::cout << "Copy DMR ... " << std::flush << copy_test(RAW) << std::endl;
+  std::cout << "Copy DMW ... " << std::flush << copy_test(WRAPPED) << std::endl;
+
+  return 0;
 }
