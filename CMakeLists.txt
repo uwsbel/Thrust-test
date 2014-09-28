@@ -4,6 +4,8 @@ INCLUDE(SBELUtils.cmake)
 
 SET(THRUST_DIR "" CACHE PATH "Location of the Thrust library")
 
+enable_openmp_support()
+
 enable_cuda_support()
 MESSAGE(STATUS "Cuda version: ${CUDA_VERSION}")
 
